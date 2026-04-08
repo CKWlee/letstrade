@@ -1,46 +1,41 @@
-#!/usr/bin/env python3
-"""
-Congress Trades — Dashboard Backend
-Run: python app.py
-"""
+# backend for the dashboard + stock picks api
+# honestly surprised this works as well as it does
 
-import math, sqlite3, json, traceback
+import math, sqlite3, json
 from datetime import datetime, timedelta
 from pathlib import Path
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "congress_trades.db"
 
 app = Flask(__name__, static_folder="static")
 
-# ---------------------------------------------------------------------------
-# Price cache (avoid re-fetching during same session)
-# ---------------------------------------------------------------------------
+# github pages needs this to call the api cross-origin
+@app.after_request
+def add_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+# price stuff — cache so we don't spam yahoo finance
 _price_cache = {}
 _price_cache_time = None
-
-# Tickers known to fail or be delisted — skip them to save time
-_BAD_TICKERS = set()
+_BAD_TICKERS = set()  # tickers that yfinance chokes on
 
 def get_prices(tickers):
-    """Batch-fetch current prices via yfinance. Returns {ticker: price}."""
+    # batch grab current prices, cache for 5 min
     global _price_cache, _price_cache_time
     now = datetime.now()
     if _price_cache_time and (now - _price_cache_time).seconds < 300:
         missing = [t for t in tickers if t not in _price_cache and t not in _BAD_TICKERS]
         if not missing:
             return _price_cache
-
     try:
         import yfinance as yf
-        # Filter: alpha only, 1-6 chars, not previously failed
         clean = [t for t in tickers if t and 1 <= len(t) <= 6
                  and t.isalpha() and t not in _BAD_TICKERS]
         if not clean:
             return _price_cache
-
-        # Batch download with short timeout
         data = yf.download(clean, period="5d", progress=False, timeout=8)
         if data.empty:
             return _price_cache
@@ -58,12 +53,12 @@ def get_prices(tickers):
                 _BAD_TICKERS.add(t)
         _price_cache_time = now
     except Exception as e:
-        print(f"Price fetch error: {e}")
+        print(f"yfinance broke: {e}")
     return _price_cache
 
 
 def get_historical_price(ticker, date_str):
-    """Get closing price on or near a specific date."""
+    # get price on a specific date, or close to it
     try:
         import yfinance as yf
         dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -72,41 +67,44 @@ def get_historical_price(ticker, date_str):
         data = yf.download(ticker, start=start, end=end, progress=False)
         if data.empty:
             return None
-        # Find closest date
         idx = data.index.get_indexer([dt], method="nearest")[0]
         return round(float(data["Close"].iloc[idx]), 2)
     except Exception:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# db + helpers
+
 def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
 def midpoint(low, high):
+    # congress reports ranges not exact numbers, so we guess the middle
     if low and high: return (low + high) / 2
     if low: return low * 1.5
     return 8000
 
 def fmt_amount(low, high):
-    ranges = [(1001,15000,"$1K–$15K"),(15001,50000,"$15K–$50K"),
-              (50001,100000,"$50K–$100K"),(100001,250000,"$100K–$250K"),
-              (250001,500000,"$250K–$500K"),(500001,1000000,"$500K–$1M"),
-              (1000001,5000000,"$1M–$5M"),(5000001,25000000,"$5M–$25M")]
+    # turn the range bounds into something readable
+    ranges = [(1001,15000,"$1K-$15K"),(15001,50000,"$15K-$50K"),
+              (50001,100000,"$50K-$100K"),(100001,250000,"$100K-$250K"),
+              (250001,500000,"$250K-$500K"),(500001,1000000,"$500K-$1M"),
+              (1000001,5000000,"$1M-$5M"),(5000001,25000000,"$5M-$25M")]
     if low:
         for lo,hi,label in ranges:
             if low == lo: return label
-    if low and high: return f"${low:,.0f}–${high:,.0f}"
+    if low and high: return f"${low:,.0f}-${high:,.0f}"
     if low: return f"${low:,.0f}+"
     return "N/A"
 
-# ---------------------------------------------------------------------------
-# Scoring
-# ---------------------------------------------------------------------------
+
+# the big scoring function
+# scores every politician on 4 things: returns, win rate, position size, recency
+# weights: 35% return, 25% win rate, 20% size, 20% recency
+# not perfect but it works surprisingly well
+
 def score_all():
     conn = get_db()
     rows = conn.execute("""
@@ -132,12 +130,13 @@ def score_all():
 
     results = []
     for pol, trades in trades_by_pol.items():
-        if len(trades) < 3: continue
+        if len(trades) < 3: continue  # not enough data to score
         buys = [t for t in trades if t["trade_type"] == "buy"]
         sells = [t for t in trades if t["trade_type"] == "sell"]
         all_tickers = set(t["ticker"] for t in trades if t["ticker"])
 
-        # Return heuristic
+        # return estimation — match buys to later sells on same ticker
+        # if no sell found, assume 5% gain (generous but whatever)
         returns = []
         for b in buys:
             t = b["ticker"]
@@ -158,6 +157,7 @@ def score_all():
         else:
             return_score, est_return_pct = 25, 0
 
+        # win rate — did the sell range beat the buy range
         wins, scored = 0, 0
         for b in buys:
             t = b["ticker"]
@@ -170,11 +170,13 @@ def score_all():
         win_rate = wins/scored if scored>0 else None
         win_score = (win_rate*100) if win_rate is not None else 50
 
+        # position size — log scaled so $8k and $75m aren't on the same axis
         sizes = [midpoint(b["amount_low"],b["amount_high"]) for b in buys]
         avg_size = sum(sizes)/len(sizes) if sizes else 8000
         total_dep = sum(sizes)
         size_score = max(0, min(100, (math.log10(max(avg_size,1000))-3.9)/(7.9-3.9)*90+10))
 
+        # recency — exponential decay, 90 day half life
         tdates = [datetime.strptime(t["trade_date"],"%Y-%m-%d") for t in trades if t["trade_date"]]
         if tdates:
             lt = max(tdates)
@@ -186,6 +188,7 @@ def score_all():
         else:
             recency_score, tpm, lt = 0, 0, None
 
+        # mash it all together
         composite = return_score*0.35 + win_score*0.25 + size_score*0.20 + recency_score*0.20
 
         results.append({
@@ -206,31 +209,27 @@ def score_all():
     return results, all_trades, {"latest": latest_str, "earliest": min(dates)}
 
 
-# ---------------------------------------------------------------------------
-# API
-# ---------------------------------------------------------------------------
+# main dashboard endpoint — feeds the frontend everything it needs
 @app.route("/api/briefing")
 def briefing():
     leaderboard, all_trades, date_range = score_all()
     if not leaderboard:
-        return jsonify({"error": "No data. Run the scraper first."})
+        return jsonify({"error": "no data — run the scraper first"})
 
     score_map = {r["politician"]: r for r in leaderboard}
     latest_dt = datetime.strptime(date_range["latest"], "%Y-%m-%d")
     now = datetime.now()
     days_stale = (now - latest_dt).days
-
     cutoff_90 = (latest_dt - timedelta(days=90)).strftime("%Y-%m-%d")
 
-    # Collect all signal tickers for batch price fetch
+    # grab all tickers from recent trades for price lookup
     recent_buys = [t for t in all_trades if t["trade_type"]=="buy" and t["ticker"] and t["trade_date"] and t["trade_date"]>=cutoff_90]
     recent_sells = [t for t in all_trades if t["trade_type"]=="sell" and t["ticker"] and t["trade_date"] and t["trade_date"]>=cutoff_90]
     all_signal_tickers = list(set(t["ticker"] for t in recent_buys+recent_sells if t["ticker"]))
 
-    # Batch fetch prices
     prices = get_prices(all_signal_tickers)
 
-    # Build buy signals
+    # buy signals — rank by: buyers^1.5 * log(buys) * recency * politician quality
     buy_ticker_data = {}
     for t in recent_buys:
         tk = t["ticker"]
@@ -267,7 +266,7 @@ def briefing():
         })
     buy_signals.sort(key=lambda x: x["signal_strength"], reverse=True)
 
-    # Build sell signals
+    # sell signals
     sell_ticker_data = {}
     for t in recent_sells:
         tk = t["ticker"]
@@ -289,7 +288,7 @@ def briefing():
         })
     sell_signals.sort(key=lambda x: (x["sellers"],x["total_sells"]), reverse=True)
 
-    # Net signals — cross-reference buys and sells per ticker
+    # net direction — are more people buying or selling each ticker
     all_tickers_in_play = set(s["ticker"] for s in buy_signals) | set(s["ticker"] for s in sell_signals)
     buy_map = {s["ticker"]:s for s in buy_signals}
     sell_map = {s["ticker"]:s for s in sell_signals}
@@ -302,28 +301,21 @@ def briefing():
         n_sellers = s["sellers"] if s else 0
         buy_cap = b["total_capital"] if b else 0
         sell_cap = s["total_capital"] if s else 0
-        net_cap = buy_cap - sell_cap
 
-        if n_buyers > 0 and n_sellers > 0:
-            direction = "mixed"
-        elif n_buyers > 0:
-            direction = "bullish"
-        else:
-            direction = "bearish"
+        if n_buyers > 0 and n_sellers > 0: direction = "mixed"
+        elif n_buyers > 0: direction = "bullish"
+        else: direction = "bearish"
 
         net_signals.append({
-            "ticker": tk,
-            "direction": direction,
-            "buyers": n_buyers,
-            "sellers": n_sellers,
-            "buy_capital": buy_cap,
-            "sell_capital": sell_cap,
-            "net_capital": net_cap,
+            "ticker": tk, "direction": direction,
+            "buyers": n_buyers, "sellers": n_sellers,
+            "buy_capital": buy_cap, "sell_capital": sell_cap,
+            "net_capital": buy_cap - sell_cap,
             "price": prices.get(tk),
         })
     net_signals.sort(key=lambda x: abs(x["net_capital"]), reverse=True)
 
-    # Big moves
+    # big moves — trades over $50k in the last 30 days
     cutoff_30 = (latest_dt - timedelta(days=30)).strftime("%Y-%m-%d")
     big_moves = sorted(
         [t for t in all_trades if t["trade_date"] and t["trade_date"]>=cutoff_30 and t["amount_low"] and t["amount_low"]>=50000],
@@ -339,29 +331,23 @@ def briefing():
             "price": prices.get(t["ticker"]) if t["ticker"] else None,
         })
 
-    # Overview
     total_buys = sum(1 for t in all_trades if t["trade_type"]=="buy")
     total_sells = sum(1 for t in all_trades if t["trade_type"]=="sell")
-
-    # Strongest signal for "Right Now" tile
     top_signal = buy_signals[0] if buy_signals else None
-    newest_trade_date = date_range["latest"]
 
     return jsonify({
         "generated_at": now.strftime("%Y-%m-%d %H:%M"),
         "data_range": date_range,
         "days_stale": days_stale,
-        "newest_trade": newest_trade_date,
+        "newest_trade": date_range["latest"],
         "overview": {
             "total_buys": total_buys, "total_sells": total_sells,
             "politicians": len(set(t["politician"] for t in all_trades)),
             "total_trades": len(all_trades),
         },
         "top_signal": {
-            "ticker": top_signal["ticker"],
-            "buyers": top_signal["buyers"],
-            "capital": top_signal["total_capital"],
-            "price": top_signal.get("price"),
+            "ticker": top_signal["ticker"], "buyers": top_signal["buyers"],
+            "capital": top_signal["total_capital"], "price": top_signal.get("price"),
             "signal_strength": top_signal["signal_strength"],
         } if top_signal else None,
         "leaderboard": leaderboard[:10],
@@ -372,25 +358,16 @@ def briefing():
         "big_moves": big_moves_out,
     })
 
-# ---------------------------------------------------------------------------
-# Personal Stock Recommendation API
-# ---------------------------------------------------------------------------
+
+# stock picks api — the whole point of this project
+# call it and it tells you what to buy or sell right now
+#
+# /api/picks?action=buy&n=5
+# /api/picks?action=sell&n=3
+# /api/picks?action=both&n=5&min_score=60
+
 @app.route("/api/picks")
 def picks():
-    """Returns top N stock picks to buy or sell right now.
-    
-    Query params:
-      ?action=buy (default) or sell or both
-      ?n=5 (how many picks, default 5)
-      ?min_score=50 (min politician score to consider, default 0)
-      ?min_buyers=1 (min distinct buyers for buy picks, default 1)
-    
-    Example:
-      /api/picks?action=buy&n=5
-      /api/picks?action=sell&n=3
-      /api/picks?action=both&n=5&min_score=60
-    """
-    from flask import request
     action = request.args.get("action", "buy")
     n = min(int(request.args.get("n", 5)), 50)
     min_score = float(request.args.get("min_score", 0))
@@ -398,15 +375,14 @@ def picks():
 
     leaderboard, all_trades, date_range = score_all()
     if not leaderboard:
-        return jsonify({"error": "No data."})
+        return jsonify({"error": "no data"})
 
     score_map = {r["politician"]: r for r in leaderboard}
     latest_dt = datetime.strptime(date_range["latest"], "%Y-%m-%d")
     cutoff = (latest_dt - timedelta(days=90)).strftime("%Y-%m-%d")
 
     recent = [t for t in all_trades if t["ticker"] and t["trade_date"] and t["trade_date"] >= cutoff]
-    all_tickers = list(set(t["ticker"] for t in recent))
-    prices = get_prices(all_tickers)
+    prices = get_prices(list(set(t["ticker"] for t in recent)))
 
     result = {"generated_at": datetime.now().isoformat(), "action": action, "picks": []}
 
@@ -431,22 +407,15 @@ def picks():
             cap = sum(midpoint(b["amount_low"], b["amount_high"]) for b in d["buys"])
             weight = (nb ** 1.5) * math.log(len(d["buys"]) + 1) * recency * (avg_sc / 50)
 
-            # Conviction tier
-            if nb >= 2 and cap >= 50000 and avg_sc >= 60:
-                tier = 1
-            elif nb >= 2 or (cap >= 50000 and avg_sc >= 50):
-                tier = 2
-            else:
-                tier = 3
+            # tier 1 = strong conviction, tier 3 = meh
+            if nb >= 2 and cap >= 50000 and avg_sc >= 60: tier = 1
+            elif nb >= 2 or (cap >= 50000 and avg_sc >= 50): tier = 2
+            else: tier = 3
 
             buy_picks.append({
-                "ticker": tk,
-                "action": "BUY",
-                "price": prices.get(tk),
-                "signal_strength": round(weight, 2),
-                "tier": tier,
-                "buyers": nb,
-                "total_buys": len(d["buys"]),
+                "ticker": tk, "action": "BUY", "price": prices.get(tk),
+                "signal_strength": round(weight, 2), "tier": tier,
+                "buyers": nb, "total_buys": len(d["buys"]),
                 "capital_deployed": round(cap),
                 "avg_politician_score": round(avg_sc, 1),
                 "days_since_last_buy": days_ago,
@@ -473,11 +442,8 @@ def picks():
             last = max(s["trade_date"] for s in d["sells"])
             days_ago = (latest_dt - datetime.strptime(last, "%Y-%m-%d")).days
             sell_picks.append({
-                "ticker": tk,
-                "action": "SELL",
-                "price": prices.get(tk),
-                "sellers": ns,
-                "total_sells": len(d["sells"]),
+                "ticker": tk, "action": "SELL", "price": prices.get(tk),
+                "sellers": ns, "total_sells": len(d["sells"]),
                 "capital_exited": round(cap),
                 "days_since_last_sell": days_ago,
                 "politicians": sorted(d["pols"]),
@@ -489,36 +455,32 @@ def picks():
     return jsonify(result)
 
 
+# lookup a specific ticker
 @app.route("/api/ticker/<ticker>")
 def ticker_detail(ticker):
-    """Get full detail on a specific ticker — who's buying, who's selling, net direction, price."""
     ticker = ticker.upper()
     leaderboard, all_trades, date_range = score_all()
     if not leaderboard:
-        return jsonify({"error": "No data."})
+        return jsonify({"error": "no data"})
 
     score_map = {r["politician"]: r for r in leaderboard}
     prices = get_prices([ticker])
 
     trades = [t for t in all_trades if t["ticker"] == ticker]
     if not trades:
-        return jsonify({"error": f"No trades found for {ticker}"})
+        return jsonify({"error": f"nothing found for {ticker}"})
 
     buys = [t for t in trades if t["trade_type"] == "buy"]
     sells = [t for t in trades if t["trade_type"] == "sell"]
-
     buy_pols = set(t["politician"] for t in buys)
     sell_pols = set(t["politician"] for t in sells)
     buy_cap = sum(midpoint(t["amount_low"], t["amount_high"]) for t in buys)
     sell_cap = sum(midpoint(t["amount_low"], t["amount_high"]) for t in sells)
 
     return jsonify({
-        "ticker": ticker,
-        "price": prices.get(ticker),
-        "total_buys": len(buys),
-        "total_sells": len(sells),
-        "buy_capital": round(buy_cap),
-        "sell_capital": round(sell_cap),
+        "ticker": ticker, "price": prices.get(ticker),
+        "total_buys": len(buys), "total_sells": len(sells),
+        "buy_capital": round(buy_cap), "sell_capital": round(sell_cap),
         "net_capital": round(buy_cap - sell_cap),
         "direction": "bullish" if buy_cap > sell_cap else "bearish" if sell_cap > buy_cap else "neutral",
         "buyers": [{"name": p, "score": score_map.get(p, {}).get("score", 0)} for p in sorted(buy_pols)],
@@ -530,14 +492,13 @@ def ticker_detail(ticker):
     })
 
 
+# lookup a specific politician — fuzzy matches name
 @app.route("/api/politician/<name>")
 def politician_detail(name):
-    """Get full detail on a specific politician — all their trades, score breakdown."""
     leaderboard, all_trades, _ = score_all()
-    # Fuzzy match: case-insensitive substring
     matches = [r for r in leaderboard if name.lower() in r["politician"].lower()]
     if not matches:
-        return jsonify({"error": f"No politician matching '{name}'"})
+        return jsonify({"error": f"nobody matching '{name}'"})
 
     pol = matches[0]
     trades = [t for t in all_trades if t["politician"] == pol["politician"]]
@@ -560,17 +521,15 @@ def index():
 if __name__ == "__main__":
     import sys
     if "--export" in sys.argv:
-        # Export API data as static JSON for Firebase/static hosting
+        # dump the api response as static json for hosting without a backend
         with app.test_client() as c:
             resp = c.get("/api/briefing")
             data = resp.data.decode()
         out = BASE_DIR / "static" / "data.json"
         with open(out, "w") as f:
             f.write(data)
-        print(f"Exported dashboard data to {out}")
-        print(f"Deploy the static/ folder to Firebase Hosting.")
+        print(f"wrote {out}")
     else:
-        print(f"\n  Congress Trades Dashboard")
-        print(f"  http://localhost:5000")
-        print(f"  Run with --export to generate static JSON for hosting\n")
-        app.run(debug=False, port=5000)
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+        print(f"running on http://localhost:{port}")
+        app.run(debug=False, port=port)
