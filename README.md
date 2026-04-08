@@ -4,7 +4,7 @@ scrapes U.S. politician stock trade disclosures straight from government sources
 
 no paid APIs. everything runs off official public filings.
 
-**[live demo](https://congress-trades-560790382976.us-central1.run.app)**
+**[live demo](https://congress-trades-560790382976.us-central1.run.app)** — heads up, the server sleeps when nobody's using it so give it ~30 seconds on first load. it's fetching live stock prices.
 
 **[stock picks API](https://congress-trades-560790382976.us-central1.run.app/api/picks?action=buy&n=5)**
 
