@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Congress Trades</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f2ee;--tile:#fff;--brd:#dddbd4;--t1:#1c1b18;--t2:#52504a;
+  --t3:#918f88;--t4:#bbb9b2;--up:#2d8a4e;--upbg:#e8f5ec;
+  --dn:#bf3b30;--dnbg:#fce9e7;--hi:#9a7400;--hibg:#faf2df;
+  --warn:#d4700a;--warnbg:#fef3e6;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Instrument Sans',system-ui,sans-serif;background:var(--bg);color:var(--t2);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.num{font-family:'Space Mono',monospace;font-variant-numeric:tabular-nums}
+.page{max-width:1140px;margin:0 auto;padding:20px 20px 60px}
+
+/* header */
+.hbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.hbar h1{font-size:15px;font-weight:700;color:var(--t1)}
+.hbar .meta{font-size:11px;color:var(--t3)}
+
+/* stale warning */
+.stale{background:var(--warnbg);border:1px solid #edd5b5;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--warn);font-weight:500}
+
+/* grid */
+.grid{display:grid;gap:14px;margin-bottom:14px}
+.g3{grid-template-columns:1fr 1fr 1fr}
+.g2{grid-template-columns:1fr 1fr}
+.g1{grid-template-columns:1fr}
+
+/* tile */
+.tile{background:var(--tile);border:1px solid var(--brd);border-radius:8px;display:flex;flex-direction:column}
+.tile-hd{padding:12px 14px 8px;display:flex;align-items:center;justify-content:space-between}
+.tile-hd h2{font-size:13px;font-weight:700;color:var(--t1)}
+.tile-hd .ct{font-size:11px;color:var(--t4)}
+.tile-body{padding:0 14px 12px;flex:1}
+.tile-ft{padding:9px 14px;border-top:1px solid var(--brd);cursor:pointer;font-size:12px;font-weight:600;color:var(--up)}
+.tile-ft:hover{background:#fafaf6}
+
+/* RIGHT NOW signal tile */
+.hero{background:var(--tile);border:1px solid var(--brd);border-radius:8px;padding:18px 20px}
+.hero .label{font-size:10px;color:var(--t3);font-weight:500;margin-bottom:6px}
+.hero .row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.hero .ticker{font-family:'Space Mono',monospace;font-size:36px;font-weight:700;color:var(--t1)}
+.hero .price{font-family:'Space Mono',monospace;font-size:18px;color:var(--t3)}
+.hero .detail{font-size:13px;color:var(--t3);margin-top:8px;line-height:1.6}
+.hero .detail b{color:var(--t1);font-weight:600}
+.hero .strength{display:inline-block;font-size:10px;font-weight:600;color:var(--up);background:var(--upbg);padding:2px 6px;border-radius:3px;margin-left:8px}
+
+/* convergence */
+.cv-big{display:flex;gap:20px;flex-wrap:wrap;padding:2px 0 6px}
+.cv-item{text-align:center}
+.cv-tk{font-family:'Space Mono',monospace;font-size:22px;font-weight:700;color:var(--t1)}
+.cv-sub{font-size:11px;color:var(--hi);font-weight:500}
+.cv-detail{display:none}.cv-preview{display:block}
+.cv-drow{padding:6px 0;border-bottom:1px solid #f0efe9;font-size:12px;display:flex;gap:8px;align-items:baseline}
+.cv-drow:last-child{border-bottom:none}
+.cv-drow .tk{font-family:'Space Mono',monospace;font-weight:700;color:var(--t1);width:40px}
+.cv-drow .mid{flex:1;color:var(--t3)}.cv-drow .mid b{color:var(--t2);font-weight:500}
+.cv-drow .rt{font-family:'Space Mono',monospace;color:var(--t2);font-weight:500;font-size:12px}
+
+/* net signal rows */
+.net-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f2f1ec;font-size:12px}
+.net-row:last-child{border-bottom:none}
+.net-tk{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--t1);width:48px}
+.net-dir{font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px}
+.net-dir.bullish{color:var(--up);background:var(--upbg)}
+.net-dir.bearish{color:var(--dn);background:var(--dnbg)}
+.net-dir.mixed{color:var(--hi);background:var(--hibg)}
+.net-mid{flex:1;color:var(--t3)}
+.net-price{font-family:'Space Mono',monospace;font-size:12px;color:var(--t2);font-weight:500}
+
+/* signal rows */
+.sg{display:flex;align-items:start;gap:6px;padding:5px 0;border-bottom:1px solid #f2f1ec;font-size:12px}
+.sg:last-child{border-bottom:none}
+.sg-tk{font-family:'Space Mono',monospace;font-size:12px;font-weight:700;color:var(--t1);width:48px;flex-shrink:0}
+.sg-mid{flex:1;color:var(--t3);min-width:0;overflow:hidden}
+.sg-mid b{color:var(--t2);font-weight:500}
+.sg-rt{font-family:'Space Mono',monospace;font-weight:500;color:var(--t2);white-space:nowrap;font-size:12px;text-align:right}
+.sg-price{font-size:11px;color:var(--t3);font-weight:400}
+.tag{font-size:9px;font-weight:700;padding:1px 4px;border-radius:2px;vertical-align:1px;margin-left:2px}
+.tag.b{color:var(--up);background:var(--upbg)}.tag.s{color:var(--dn);background:var(--dnbg)}.tag.c{color:var(--hi);background:var(--hibg)}
+
+/* expanded full view */
+.detail{display:none}
+.sg-full{padding:7px 0;border-bottom:1px solid #f2f1ec;font-size:12px}
+.sg-full:last-child{border-bottom:none}
+.sg-full .head{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.sg-full .tk{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--t1)}
+.sg-full .nm{color:var(--t3)}
+.sg-full .cp{margin-left:auto;font-family:'Space Mono',monospace;font-weight:500;color:var(--t2)}
+.sg-full .pr{font-family:'Space Mono',monospace;font-size:11px;color:var(--t3);margin-left:6px}
+.sg-full .pols{color:var(--t3);margin-top:2px;line-height:1.6}.sg-full .pols b{color:var(--t2);font-weight:500}
+.sg-full .meta{color:var(--t4);font-size:11px;margin-top:1px}
+
+/* rank rows */
+.rk{padding:8px 0;border-bottom:1px solid #f0efe9}
+.rk:last-child{border-bottom:none}
+.rk-top{display:flex;align-items:baseline;gap:6px}
+.rk-n{font-family:'Space Mono',monospace;font-size:11px;color:var(--t4);width:16px}
+.rk-name{font-size:13px;font-weight:600;color:var(--t1)}
+.rk-loc{font-size:11px;color:var(--t3)}
+.rk-sc{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;color:var(--t1);margin-left:auto}
+.rk-stats{font-size:11px;color:var(--t3);margin-left:22px;margin-top:2px}
+.rk-stats b{color:var(--t2);font-weight:500}
+
+/* move rows */
+.mv{display:flex;align-items:baseline;gap:6px;padding:5px 0;border-bottom:1px solid #f2f1ec;font-size:12px}
+.mv:last-child{border-bottom:none}
+.mv-tk{font-family:'Space Mono',monospace;font-weight:700;color:var(--t1);width:44px}
+.mv-mid{flex:1;color:var(--t3)}.mv-mid b{color:var(--t2);font-weight:500}
+.mv-rt{font-family:'Space Mono',monospace;font-weight:500;color:var(--t2);font-size:12px;white-space:nowrap}
+
+.foot{font-size:10px;color:var(--t4);margin-top:16px}
+#L{text-align:center;padding:100px 0;color:var(--t4)}
+#D{display:none}
+@media(max-width:768px){.g3,.g2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+<div id="L">Loading...</div>
+<div id="D">
+
+<div class="hbar">
+  <h1>Congress Trades</h1>
+  <div class="meta" id="meta"></div>
+</div>
+
+<div id="stale-wrap"></div>
+
+<!-- Row 0: Hero + Convergence + Net direction -->
+<div class="grid g3" id="row0"></div>
+
+<!-- Row 1: Buy signals + Sell signals -->
+<div class="grid g2" id="row1"></div>
+
+<!-- Row 2: Top traders + Recent moves -->
+<div class="grid g2" id="row2"></div>
+
+<div class="foot">Source: U.S. House Clerk periodic transaction reports, Senate eFD filings. Public data, not financial advice.</div>
+</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const f=n=>n!=null?n.toLocaleString():'—';
+const fd=n=>n!=null?'$'+n.toLocaleString():'—';
+const fp=n=>n!=null?'$'+n.toFixed(2):'';
+const tr=(s,n)=>!s?'':s.replace(/\n/g,' ').slice(0,n)+(s.length>n?'…':'');
+
+function tog(btn,dId,pId,total){
+  const d=document.getElementById(dId),p=document.getElementById(pId);
+  if(!d.style.display||d.style.display==='none'){
+    d.style.display='block';if(p)p.style.display='none';btn.textContent='Show less';
+  }else{
+    d.style.display='none';if(p)p.style.display='';btn.textContent='View all '+total;
+  }
+}
+
+// Try live API first (local Flask), fall back to static JSON (Firebase hosting)
+fetch('/api/briefing').catch(()=>fetch('/data.json')).then(r=>r.json()).then(d=>{
+if(d.error){$('#L').textContent=d.error;return}
+const o=d.overview;
+
+$('#meta').textContent=d.data_range.earliest+' → '+d.data_range.latest+'  ·  '+o.politicians+' politicians';
+
+// Stale warning
+if(d.days_stale > 7){
+  $('#stale-wrap').innerHTML=`<div class="stale">Data is ${d.days_stale} days old — newest trade is from ${d.newest_trade}. Run the scraper to refresh.</div>`;
+}
+
+let r0='';
+
+// HERO: Right Now — top signal
+if(d.top_signal){
+  const ts=d.top_signal;
+  const priceStr=ts.price?fp(ts.price):'';
+  // Find the full signal for more detail
+  const fullSig=d.buy_signals.find(s=>s.ticker===ts.ticker);
+  const polNames=fullSig?fullSig.politicians.map(p=>p.name.split(' ').pop()).join(', '):'';
+  r0+=`<div class="hero"><div class="label">Strongest signal</div><div class="row"><span class="ticker">${ts.ticker}</span><span class="price">${priceStr}</span></div><div class="detail"><b>${ts.buyers} politicians</b> buying · <b>${fd(ts.capital)}</b> deployed${fullSig?` · ${fullSig.days_ago}d ago`:''}<br>${polNames}</div></div>`;
+}
+
+// CONVERGENCE
+if(d.convergence?.length){
+  const cvSum=d.convergence.map(c=>`<div class="cv-item"><div class="cv-tk">${c.ticker}</div><div class="cv-sub">${c.buyers} buyers · ${c.price?fp(c.price):''}</div></div>`).join('');
+  const cvDet=d.convergence.map(c=>{
+    const ps=c.politicians.map(p=>`<b>${p.name}</b> ${p.score}`).join(' · ');
+    return`<div class="cv-drow"><div class="tk">${c.ticker}</div><div class="mid">${ps}</div><div class="rt">${fd(c.total_capital)}</div></div>`;
+  }).join('');
+  r0+=`<div class="tile"><div class="tile-hd"><h2>Convergence</h2><div class="ct">${d.convergence.length} stocks</div></div><div class="tile-body"><div id="cvP" class="cv-preview"><div class="cv-big">${cvSum}</div></div><div id="cvD" class="cv-detail">${cvDet}</div></div><div class="tile-ft" onclick="tog(this,'cvD','cvP',${d.convergence.length})">View details</div></div>`;
+} else {
+  r0+=`<div class="tile"><div class="tile-hd"><h2>Convergence</h2></div><div class="tile-body" style="padding:16px 14px;color:var(--t4)">No multi-buyer convergence detected.</div></div>`;
+}
+
+// NET SIGNALS
+const netPrev=d.net_signals.slice(0,5).map(n=>{
+  const dir=n.direction;
+  const arrow=dir==='bullish'?'↑':dir==='bearish'?'↓':'↕';
+  return`<div class="net-row"><div class="net-tk">${n.ticker}</div><div class="net-dir ${dir}">${arrow} ${dir}</div><div class="net-mid">${n.buyers}B ${n.sellers}S</div>${n.price?`<div class="net-price">${fp(n.price)}</div>`:''}</div>`;
+}).join('');
+const netFull=d.net_signals.map(n=>{
+  const dir=n.direction;
+  const arrow=dir==='bullish'?'↑':dir==='bearish'?'↓':'↕';
+  return`<div class="net-row"><div class="net-tk">${n.ticker}</div><div class="net-dir ${dir}">${arrow} ${dir}</div><div class="net-mid">${n.buyers} buying · ${n.sellers} selling · net ${fd(n.net_capital)}</div>${n.price?`<div class="net-price">${fp(n.price)}</div>`:''}</div>`;
+}).join('');
+r0+=`<div class="tile"><div class="tile-hd"><h2>Net Direction</h2><div class="ct">${d.net_signals.length} tickers</div></div><div class="tile-body"><div id="netP">${netPrev}</div><div class="detail" id="netD">${netFull}</div></div><div class="tile-ft" onclick="tog(this,'netD','netP',${d.net_signals.length})">View all ${d.net_signals.length}</div></div>`;
+
+$('#row0').innerHTML=r0;
+
+// ROW 1: Buy + Sell signals
+let r1='';
+
+// Buy preview
+const buyPrev=d.buy_signals.slice(0,5).map(s=>{
+  const who=s.politicians.slice(0,2).map(p=>p.name.split(' ').pop()).join(', ')+(s.politicians.length>2?' +':'');
+  return`<div class="sg"><div class="sg-tk">${s.ticker}${s.buyers>=2?'<span class="tag c">C</span>':''}</div><div class="sg-mid">${who} · ${s.buyers}× · ${s.days_ago}d</div><div class="sg-rt">${fd(s.total_capital)}${s.price?`<div class="sg-price">${fp(s.price)}</div>`:''}</div></div>`;
+}).join('');
+const buyFull=d.buy_signals.map(s=>{
+  const ps=s.politicians.map(p=>`<b>${p.name}</b> (${p.score}) ${p.amount}`).join(' · ');
+  return`<div class="sg-full"><div class="head"><span class="tk">${s.ticker}</span>${s.buyers>=2?'<span class="tag c">CONV</span>':''}<span class="tag b">BUY</span><span class="nm">${tr(s.asset_name,38)}</span><span class="cp">${fd(s.total_capital)}</span>${s.price?`<span class="pr">${fp(s.price)}</span>`:''}</div><div class="pols">${ps}</div><div class="meta">${s.buyers} buyer${s.buyers>1?'s':''} · ${s.total_buys} buys · ${s.days_ago}d ago · score ${s.avg_politician_score}</div></div>`;
+}).join('');
+r1+=`<div class="tile"><div class="tile-hd"><h2>Buy Signals</h2><div class="ct">${d.buy_signals.length}</div></div><div class="tile-body"><div id="buyP">${buyPrev}</div><div class="detail" id="buyD">${buyFull}</div></div><div class="tile-ft" onclick="tog(this,'buyD','buyP',${d.buy_signals.length})">View all ${d.buy_signals.length}</div></div>`;
+
+// Sell preview
+const sellPrev=d.sell_signals.slice(0,5).map(s=>{
+  return`<div class="sg"><div class="sg-tk">${s.ticker}</div><div class="sg-mid">${s.politicians.slice(0,2).join(', ')} · ${s.days_ago}d</div><div class="sg-rt">${fd(s.total_capital)}${s.price?`<div class="sg-price">${fp(s.price)}</div>`:''}</div></div>`;
+}).join('');
+const sellFull=d.sell_signals.map(s=>{
+  return`<div class="sg-full"><div class="head"><span class="tk">${s.ticker}</span><span class="tag s">SELL</span><span class="nm">${tr(s.asset_name,38)}</span><span class="cp">${fd(s.total_capital)}</span>${s.price?`<span class="pr">${fp(s.price)}</span>`:''}</div><div class="pols">${s.politicians.join(', ')}</div><div class="meta">${s.sellers} seller${s.sellers>1?'s':''} · ${s.total_sells} sells · ${s.days_ago}d ago</div></div>`;
+}).join('');
+r1+=`<div class="tile"><div class="tile-hd"><h2>Sell Signals</h2><div class="ct">${d.sell_signals.length}</div></div><div class="tile-body"><div id="sellP">${sellPrev}</div><div class="detail" id="sellD">${sellFull}</div></div><div class="tile-ft" onclick="tog(this,'sellD','sellP',${d.sell_signals.length})">View all ${d.sell_signals.length}</div></div>`;
+
+$('#row1').innerHTML=r1;
+
+// ROW 2: Traders + Moves
+let r2='';
+
+const rkPrev=d.leaderboard.slice(0,3).map((p,i)=>`<div class="rk"><div class="rk-top"><span class="rk-n">${p.rank}</span><span class="rk-name">${p.politician}</span><span class="rk-loc">${p.state}</span><span class="rk-sc">${p.score}</span></div><div class="rk-stats">Return <b>${p.est_return_pct}%</b> · Win <b>${p.win_rate_pct!=null?p.win_rate_pct+'%':'—'}</b> · <b>${p.buys}</b> buys · <b>${fd(p.total_deployed)}</b></div></div>`).join('');
+const rkFull=d.leaderboard.map(p=>`<div class="rk"><div class="rk-top"><span class="rk-n">${p.rank}</span><span class="rk-name">${p.politician}</span><span class="rk-loc">${p.state}</span><span class="rk-sc">${p.score}</span></div><div class="rk-stats">Return <b>${p.est_return_pct}%</b> · Win <b>${p.win_rate_pct!=null?p.win_rate_pct+'%':'—'}</b> · Avg <b>${fd(p.avg_position)}</b> · Capital <b>${fd(p.total_deployed)}</b> · <b>${p.buys}</b> buys · <b>${p.unique_tickers}</b> tickers · Last <b>${p.last_trade}</b></div></div>`).join('');
+r2+=`<div class="tile"><div class="tile-hd"><h2>Top Traders</h2><div class="ct">${d.leaderboard.length}</div></div><div class="tile-body"><div id="rkP">${rkPrev}</div><div class="detail" id="rkD">${rkFull}</div></div><div class="tile-ft" onclick="tog(this,'rkD','rkP',${d.leaderboard.length})">View all ${d.leaderboard.length}</div></div>`;
+
+if(d.big_moves?.length){
+  const mvPrev=d.big_moves.slice(0,4).map(m=>`<div class="mv"><div class="mv-tk">${m.ticker||'—'}<span class="tag ${m.type==='buy'?'b':'s'}">${m.type[0].toUpperCase()}</span></div><div class="mv-mid"><b>${m.politician}</b> · ${m.date}</div><div class="mv-rt">${m.amount}</div></div>`).join('');
+  const mvFull=d.big_moves.map(m=>`<div class="mv"><div class="mv-tk">${m.ticker||'—'}<span class="tag ${m.type==='buy'?'b':'s'}">${m.type[0].toUpperCase()}</span></div><div class="mv-mid"><b>${m.politician}</b> (${m.score}) · ${m.date} · ${tr((m.asset||'').replace(/\n/g,' '),32)}</div><div class="mv-rt">${m.amount}${m.price?`<div class="sg-price">${fp(m.price)}</div>`:''}</div></div>`).join('');
+  r2+=`<div class="tile"><div class="tile-hd"><h2>Large Trades</h2><div class="ct">$50K+</div></div><div class="tile-body"><div id="mvP">${mvPrev}</div><div class="detail" id="mvD">${mvFull}</div></div><div class="tile-ft" onclick="tog(this,'mvD','mvP',${d.big_moves.length})">View all ${d.big_moves.length}</div></div>`;
+}
+
+$('#row2').innerHTML=r2;
+
+$('#L').style.display='none';
+$('#D').style.display='block';
+}).catch(e=>{$('#L').textContent='Failed to load.';console.error(e)});
+</script>
+</body>
+</html>

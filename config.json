@@ -1,0 +1,33 @@
+{
+    "// SCORING WEIGHTS (must sum to 1.0)": "",
+    "weight_return": 0.35,
+    "weight_win_rate": 0.25,
+    "weight_size": 0.20,
+    "weight_recency": 0.20,
+
+    "// THRESHOLDS": "",
+    "signal_threshold": 60,
+    "min_trades": 3,
+    "lookback_days": 730,
+
+    "// RETURN ESTIMATION": "",
+    "hold_period_days": 60,
+    "use_live_prices": true,
+
+    "// RECENCY DECAY": "",
+    "recency_half_life_days": 90,
+
+    "// POSITION SIZE MIDPOINTS (dollar midpoints for each disclosure range)": "",
+    "size_midpoints": {
+        "1001_15000": 8000,
+        "15001_50000": 32500,
+        "50001_100000": 75000,
+        "100001_250000": 175000,
+        "250001_500000": 375000,
+        "500001_1000000": 750000,
+        "1000001_5000000": 3000000,
+        "5000001_25000000": 15000000,
+        "25000001_50000000": 37500000,
+        "50000001_plus": 75000000
+    }
+}

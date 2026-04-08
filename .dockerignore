@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+.firebase
+*.log
+venv/
+.env
+*.md
+dashboard.py
+scorer.py
+firebase.json
+*.zip
